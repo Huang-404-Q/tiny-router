@@ -12,6 +12,29 @@ Claude Code talks only to this local server. The router forwards each `/v1/messa
 
 The router treats that directive as a whitelist state update only. Real upstream `baseUrl`, API keys, and model names stay in local config and are never trusted from model output.
 
+## How It Works
+
+You run `tiny-router` as a local gateway first. Then Claude Code connects to `tiny-router` instead of connecting directly to your model provider.
+
+```text
+Claude Code -> tiny-router -> upstream A or upstream B
+```
+
+The config file is local-only:
+
+- Claude Code only sees `ANTHROPIC_BASE_URL=http://127.0.0.1:3456` and your local `routerApiKey`.
+- `tiny-router` reads `router.config.json` and knows the real upstream API keys, base URLs, and model names.
+- The assistant may suggest the next route with `{"model":"A"}` or `{"model":"B"}`.
+- The router only accepts `A` or `B` as local route names. It never trusts model output for real API keys, real model names, or real base URLs.
+
+You do not need to manually add the routing instruction to every prompt. By default, `tiny-router` appends `routeInstruction` to the request system prompt on each request. You can edit that instruction in `router.config.json`, or disable it with:
+
+```json
+{
+  "injectRouteInstruction": false
+}
+```
+
 ## Why
 
 Use a stronger or more expensive model for planning, architecture, and difficult debugging, then let the conversation switch itself to a cheaper model for narrow implementation work.
@@ -22,6 +45,47 @@ This is experimental. It may reduce cost for some workflows, but it is not a gua
 
 - Node.js 18+
 - Claude Code or another client that can use an Anthropic-compatible `/v1/messages` endpoint
+
+## How to Use It, Step by Step
+
+1. Create your local config:
+
+```sh
+cp router.config.example.json router.config.json
+```
+
+2. Put your real providers in `router.config.json`:
+
+```json
+{
+  "upstreams": {
+    "A": {
+      "baseUrl": "https://your-strong-provider.example.com",
+      "apiKey": "your-strong-provider-key",
+      "model": "strong-model"
+    },
+    "B": {
+      "baseUrl": "https://your-cheap-provider.example.com",
+      "apiKey": "your-cheap-provider-key",
+      "model": "cheap-model"
+    }
+  }
+}
+```
+
+3. Start the local gateway:
+
+```sh
+npm start
+```
+
+4. Start Claude Code with the gateway as its Anthropic endpoint:
+
+```sh
+ANTHROPIC_BASE_URL=http://127.0.0.1:3456 ANTHROPIC_API_KEY=local-router-key claude
+```
+
+5. Use Claude Code normally. The router will inject the routing instruction, forward each request to the current route, read the assistant's route directive, and use that route on the next request.
 
 ## Setup
 
@@ -145,6 +209,29 @@ Claude Code 只连接这个本地服务。router 会把每一轮 `/v1/messages` 
 
 router 只把这个 JSON 当成白名单状态更新。真实的上游 `baseUrl`、API key、模型名都只保存在本地配置里，永远不相信模型输出里的真实上游信息。
 
+## 工作原理
+
+你需要先启动 `tiny-router` 这个本地 gateway。然后让 Claude Code 连接 `tiny-router`，而不是直接连接模型服务商。
+
+```text
+Claude Code -> tiny-router -> 上游 A 或上游 B
+```
+
+配置文件只保存在本地：
+
+- Claude Code 只知道 `ANTHROPIC_BASE_URL=http://127.0.0.1:3456` 和你的本地 `routerApiKey`。
+- `tiny-router` 会读取 `router.config.json`，里面保存真实上游 API key、base URL 和模型名。
+- assistant 可以用 `{"model":"A"}` 或 `{"model":"B"}` 建议下一轮 route。
+- router 只接受 `A` 或 `B` 这两个本地 route 名。它永远不会相信模型输出里的真实 API key、真实模型名或真实 base URL。
+
+你不需要手动在每个 prompt 里写路由约束。默认情况下，`tiny-router` 每轮都会把 `routeInstruction` 追加到 system prompt。你可以在 `router.config.json` 里修改这段约束，也可以关闭它：
+
+```json
+{
+  "injectRouteInstruction": false
+}
+```
+
 ## 为什么
 
 你可以用更强或更贵的模型处理规划、架构、复杂 debug，然后让同一个 Claude Code 会话自动切到更便宜的模型处理局部实现、跑命令、补测试等窄任务。
@@ -155,6 +242,47 @@ router 只把这个 JSON 当成白名单状态更新。真实的上游 `baseUrl`
 
 - Node.js 18+
 - Claude Code，或者其他能使用 Anthropic-compatible `/v1/messages` endpoint 的客户端
+
+## 一步一步使用
+
+1. 创建本地配置：
+
+```sh
+cp router.config.example.json router.config.json
+```
+
+2. 在 `router.config.json` 里写入你的真实模型服务商配置：
+
+```json
+{
+  "upstreams": {
+    "A": {
+      "baseUrl": "https://your-strong-provider.example.com",
+      "apiKey": "your-strong-provider-key",
+      "model": "strong-model"
+    },
+    "B": {
+      "baseUrl": "https://your-cheap-provider.example.com",
+      "apiKey": "your-cheap-provider-key",
+      "model": "cheap-model"
+    }
+  }
+}
+```
+
+3. 启动本地 gateway：
+
+```sh
+npm start
+```
+
+4. 让 Claude Code 把这个 gateway 当成 Anthropic endpoint：
+
+```sh
+ANTHROPIC_BASE_URL=http://127.0.0.1:3456 ANTHROPIC_API_KEY=local-router-key claude
+```
+
+5. 正常使用 Claude Code。router 会自动注入路由约束，把请求转发到当前 route，读取 assistant 回复里的 route 指令，并在下一轮切换到对应 route。
 
 ## 配置
 
