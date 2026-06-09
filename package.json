@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/server.js",
     "check": "node --check src/server.js && node --check tests/fake-upstream.test.js",
-    "test": "node tests/fake-upstream.test.js"
+    "test": "node tests/fake-upstream.test.js",
+    "claude:router": "powershell -ExecutionPolicy Bypass -File scripts/claude-router.ps1"
   },
   "engines": {
     "node": ">=18"
@@ -15,6 +16,7 @@
   "files": [
     "src",
     "tests",
+    "scripts",
     "router.config.example.json",
     "README.md",
     "LICENSE"

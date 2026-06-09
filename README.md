@@ -87,6 +87,29 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:3456 ANTHROPIC_API_KEY=local-router-key clau
 
 5. Use Claude Code normally. The router will inject the routing instruction, forward each request to the current route, read the assistant's route directive, and use that route on the next request.
 
+## Windows One-Command Launch
+
+On Windows, the easiest way is to let the helper script start the router and launch Claude Code with the right temporary environment variables:
+
+```powershell
+npm run claude:router
+```
+
+The script will:
+
+- read `router.config.json`
+- start `tiny-router` if it is not already running
+- unset `ANTHROPIC_AUTH_TOKEN` for this Claude Code process to avoid auth conflicts
+- set `ANTHROPIC_BASE_URL` to the local router
+- set `ANTHROPIC_API_KEY` to `routerApiKey`
+- launch `claude`
+
+For `cmd.exe`, you can also run:
+
+```bat
+scripts\claude-router.cmd
+```
+
 ## Setup
 
 Copy the example config:
@@ -283,6 +306,29 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:3456 ANTHROPIC_API_KEY=local-router-key clau
 ```
 
 5. 正常使用 Claude Code。router 会自动注入路由约束，把请求转发到当前 route，读取 assistant 回复里的 route 指令，并在下一轮切换到对应 route。
+
+## Windows 一键启动
+
+在 Windows 上，最简单的方式是让 helper script 自动启动 router，并用正确的临时环境变量启动 Claude Code：
+
+```powershell
+npm run claude:router
+```
+
+这个脚本会：
+
+- 读取 `router.config.json`
+- 如果 `tiny-router` 没启动，就自动启动它
+- 为这次 Claude Code 进程清掉 `ANTHROPIC_AUTH_TOKEN`，避免 auth conflict
+- 把 `ANTHROPIC_BASE_URL` 设置成本地 router
+- 把 `ANTHROPIC_API_KEY` 设置成 `routerApiKey`
+- 启动 `claude`
+
+如果你用的是 `cmd.exe`，也可以运行：
+
+```bat
+scripts\claude-router.cmd
+```
 
 ## 配置
 
