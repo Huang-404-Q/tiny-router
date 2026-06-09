@@ -1,0 +1,23 @@
+{
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 3456
+  },
+  "routerApiKey": "dev-router-key",
+  "defaultRoute": "A",
+  "stateFile": ".router-state.json",
+  "injectRouteInstruction": true,
+  "routeInstruction": "At the very end of every assistant response, append exactly one JSON object on its own line choosing the model for the next request: {\"model\":\"A\",\"reason\":\"short reason\"} or {\"model\":\"B\",\"reason\":\"short reason\"}. Choose A for planning, architecture, broad reasoning, and difficult debugging. Choose B for execution, local edits, narrow code changes, and running commands.",
+  "upstreams": {
+    "A": {
+      "baseUrl": "https://api.anthropic.com",
+      "apiKey": "sk-ant-...",
+      "model": "claude-opus-4-7"
+    },
+    "B": {
+      "baseUrl": "https://api.anthropic.com",
+      "apiKey": "sk-ant-...",
+      "model": "claude-sonnet-4-6"
+    }
+  }
+}
