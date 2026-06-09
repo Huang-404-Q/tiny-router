@@ -95,7 +95,27 @@ On Windows, the easiest way is to let the helper script start the router and lau
 npm run claude:router
 ```
 
-The script will:
+This command is meant to be run from the `tiny-router` project directory.
+
+For global use, link the package once:
+
+```powershell
+npm link
+```
+
+Then you can run this from the directory that contains `router.config.json`:
+
+```powershell
+claude-router
+```
+
+Or pass a config path from anywhere:
+
+```powershell
+claude-router --config D:\path\to\router.config.json
+```
+
+The launcher will:
 
 - read `router.config.json`
 - start `tiny-router` if it is not already running
@@ -104,7 +124,7 @@ The script will:
 - set `ANTHROPIC_API_KEY` to `routerApiKey`
 - launch `claude`
 
-For `cmd.exe`, you can also run:
+For `cmd.exe`, you can also run the local script from the `tiny-router` project directory:
 
 ```bat
 scripts\claude-router.cmd
@@ -315,7 +335,27 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:3456 ANTHROPIC_API_KEY=local-router-key clau
 npm run claude:router
 ```
 
-这个脚本会：
+这个命令需要在 `tiny-router` 项目目录下运行。
+
+如果你想全局使用，可以先在项目目录里执行一次：
+
+```powershell
+npm link
+```
+
+之后你可以在包含 `router.config.json` 的目录里直接运行：
+
+```powershell
+claude-router
+```
+
+也可以在任何目录传入配置文件路径：
+
+```powershell
+claude-router --config D:\path\to\router.config.json
+```
+
+这个 launcher 会：
 
 - 读取 `router.config.json`
 - 如果 `tiny-router` 没启动，就自动启动它
@@ -324,7 +364,7 @@ npm run claude:router
 - 把 `ANTHROPIC_API_KEY` 设置成 `routerApiKey`
 - 启动 `claude`
 
-如果你用的是 `cmd.exe`，也可以运行：
+如果你用的是 `cmd.exe`，也可以在 `tiny-router` 项目目录下运行本地脚本：
 
 ```bat
 scripts\claude-router.cmd

@@ -4,6 +4,9 @@
   "description": "Tiny Anthropic-compatible self-routing gateway for Claude Code experiments.",
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "claude-router": "bin/claude-router.js"
+  },
   "scripts": {
     "start": "node src/server.js",
     "check": "node --check src/server.js && node --check tests/fake-upstream.test.js",
@@ -17,6 +20,7 @@
     "src",
     "tests",
     "scripts",
+    "bin",
     "router.config.example.json",
     "README.md",
     "LICENSE"
