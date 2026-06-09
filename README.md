@@ -111,9 +111,19 @@ claude
 
 ## Check
 
+Run syntax checks:
+
 ```sh
 npm run check
 ```
+
+Run the fake upstream integration test:
+
+```sh
+npm test
+```
+
+The test starts two local fake upstreams and verifies route switching, model rewriting, invalid route fallback, and upstream path handling.
 
 ## License
 
