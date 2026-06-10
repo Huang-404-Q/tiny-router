@@ -73,13 +73,23 @@ cp router.config.example.json router.config.json
 }
 ```
 
-3. Start the local gateway:
+3. Start the local gateway from the `tiny-router` project root directory:
 
 ```sh
+cd tiny-router
 npm start
 ```
 
-4. Start Claude Code with the gateway as its Anthropic endpoint:
+You should see output like:
+
+```text
+tiny-router listening on http://127.0.0.1:3456
+next route: control
+```
+
+Keep this terminal open. This process is the local gateway: Claude Code will send requests to `http://127.0.0.1:3456`, and `tiny-router` will forward them to the configured upstream provider.
+
+4. In a second terminal, start Claude Code with the gateway as its Anthropic endpoint:
 
 ```sh
 ANTHROPIC_BASE_URL=http://127.0.0.1:3456 ANTHROPIC_API_KEY=local-router-key claude
@@ -87,40 +97,32 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:3456 ANTHROPIC_API_KEY=local-router-key clau
 
 5. Use Claude Code normally. The router will inject the routing instruction, forward each request to the current route, read the assistant's route directive, and use that route on the next request.
 
-## Windows One-Command Launch
+## Windows Usage
 
-On Windows, you can use the root-level `.cmd` files without `npm link`.
+Use two terminals so it is clear which process is the gateway and which process is Claude Code.
 
-Step 1: start the gateway in one terminal:
+Step 1: in the `tiny-router` project directory, start the gateway:
 
 ```bat
+cd /d D:\path\to\tiny-router
 start-router.cmd
 ```
 
-Step 2: open a Claude Code terminal with router environment variables already set:
+Keep this terminal open.
+
+Step 2: in the project where you actually want to use Claude Code, set Claude Code to use the running gateway and then start Claude Code:
 
 ```bat
-use-router.cmd
-```
-
-Then run Claude Code inside that terminal:
-
-```bat
+cd /d D:\path\to\your-project
+set ANTHROPIC_AUTH_TOKEN=
+set ANTHROPIC_BASE_URL=http://127.0.0.1:3456
+set ANTHROPIC_API_KEY=local-router-key
 claude
 ```
 
-If you want one command that sets the environment and launches Claude Code immediately, run:
+Replace `local-router-key` with the `routerApiKey` value from `tiny-router\router.config.json` if you changed it.
 
-```bat
-claude-router.cmd
-```
-
-The scripts will:
-
-- read `router.config.json`
-- set `ANTHROPIC_BASE_URL` to the local router
-- set `ANTHROPIC_API_KEY` to `routerApiKey`
-- unset `ANTHROPIC_AUTH_TOKEN` for that terminal or Claude Code process to avoid auth conflicts
+The `router.config.json` file belongs in the `tiny-router` directory by default. Other projects do not need their own router config unless you intentionally want a different gateway config and start `tiny-router` with `TINY_ROUTER_CONFIG` pointing at that file.
 
 ## Setup
 
@@ -171,11 +173,14 @@ You can also use Claude Code-style env blocks:
 }
 ```
 
-Start the gateway:
+Start the gateway from the `tiny-router` project root directory:
 
 ```sh
+cd tiny-router
 npm start
 ```
+
+Leave that terminal running while you use Claude Code.
 
 Point Claude Code at it:
 
@@ -191,6 +196,39 @@ $env:ANTHROPIC_API_KEY="local-router-key"
 claude
 ```
 
+## Multi-Client Mode
+
+If you want one gateway to serve multiple Claude Code terminals with different route configs, use `clients` instead of a single `routerApiKey`:
+
+```json
+{
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 3456
+  },
+  "clients": {
+    "project-a": {
+      "apiKey": "router-token-project-a",
+      "config": "/path/to/project-a/router.config.json"
+    },
+    "project-b": {
+      "apiKey": "router-token-project-b",
+      "config": "/path/to/project-b/router.config.json"
+    }
+  }
+}
+```
+
+Each referenced config file uses the same schema as `router.config.example.json`: `defaultRoute`, `stateFile`, `routeInstruction`, and `upstreams`.
+
+When using multi-client mode, start the gateway the same way, but each Claude Code terminal uses its own token:
+
+```sh
+ANTHROPIC_BASE_URL=http://127.0.0.1:3456 ANTHROPIC_API_KEY=router-token-project-a claude
+```
+
+The router token is only a local gateway credential. It is **not** your upstream provider API key. The real upstream API keys stay inside each project config file.
+
 ## Behavior
 
 - Supports `POST /v1/messages`.
@@ -199,7 +237,7 @@ claude
 - Appends a route instruction to the system prompt by default.
 - Accepts only configured route names from the assistant directive. `route` is preferred; `model` remains a backward-compatible alias.
 - Keeps the previous route if the directive is missing or invalid.
-- Writes route state to `.router-state.json` by default.
+- Writes route state to `.router-state.json` by default; in multi-client mode, each client gets its own state file.
 - Preserves upstream paths, so a base URL like `https://api.example.com/coding` becomes `https://api.example.com/coding/v1/messages`.
 
 ## Security Notes
@@ -305,13 +343,23 @@ cp router.config.example.json router.config.json
 }
 ```
 
-3. 启动本地 gateway：
+3. 在 `tiny-router` 项目根目录启动本地 gateway：
 
 ```sh
+cd tiny-router
 npm start
 ```
 
-4. 让 Claude Code 把这个 gateway 当成 Anthropic endpoint：
+正常情况下你会看到类似输出：
+
+```text
+tiny-router listening on http://127.0.0.1:3456
+next route: control
+```
+
+这个终端要保持打开。这个进程就是本地 gateway：Claude Code 会把请求发到 `http://127.0.0.1:3456`，然后 `tiny-router` 再转发到你配置的上游模型服务商。
+
+4. 再开一个终端，让 Claude Code 把这个 gateway 当成 Anthropic endpoint：
 
 ```sh
 ANTHROPIC_BASE_URL=http://127.0.0.1:3456 ANTHROPIC_API_KEY=local-router-key claude
@@ -319,40 +367,32 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:3456 ANTHROPIC_API_KEY=local-router-key clau
 
 5. 正常使用 Claude Code。router 会自动注入路由约束，把请求转发到当前 route，读取 assistant 回复里的 route 指令，并在下一轮切换到对应 route。
 
-## Windows 一键启动
+## Windows 使用方式
 
-在 Windows 上，不需要 `npm link`，也不需要手动设置环境变量。用项目根目录下的两个 `.cmd` 文件就行。
+建议用两个终端，这样能明确区分：哪个终端在跑 gateway，哪个终端在跑 Claude Code。
 
-第一步：开一个终端启动网关：
+第一步：在 `tiny-router` 项目目录启动 gateway：
 
 ```bat
+cd /d D:\path\to\tiny-router
 start-router.cmd
 ```
 
-第二步：再开一个已经配置好 tiny-router 环境变量的终端：
+这个终端保持打开。
+
+第二步：进入你真正想用 Claude Code 的项目目录，设置 Claude Code 连接正在运行的 gateway，然后启动 Claude Code：
 
 ```bat
-use-router.cmd
-```
-
-然后在这个终端里正常运行 Claude Code：
-
-```bat
+cd /d D:\path\to\your-project
+set ANTHROPIC_AUTH_TOKEN=
+set ANTHROPIC_BASE_URL=http://127.0.0.1:3456
+set ANTHROPIC_API_KEY=local-router-key
 claude
 ```
 
-如果你想一步直接启动 Claude Code，也可以运行：
+如果你改过 `tiny-router\router.config.json` 里的 `routerApiKey`，这里的 `local-router-key` 要换成你的值。
 
-```bat
-claude-router.cmd
-```
-
-这些脚本会：
-
-- 读取 `router.config.json`
-- 把 `ANTHROPIC_BASE_URL` 设置成本地 router
-- 把 `ANTHROPIC_API_KEY` 设置成 `routerApiKey`
-- 清掉这个终端里的 `ANTHROPIC_AUTH_TOKEN`，避免 auth conflict
+默认情况下，`router.config.json` 放在 `tiny-router` 目录里就够了。其他项目不需要各放一份 router 配置，除非你有意为不同项目使用不同 gateway 配置，并用 `TINY_ROUTER_CONFIG` 指向对应配置文件来启动 `tiny-router`。
 
 ## 配置
 
@@ -403,11 +443,14 @@ cp router.config.example.json router.config.json
 }
 ```
 
-启动 gateway：
+在 `tiny-router` 项目根目录启动 gateway：
 
 ```sh
+cd tiny-router
 npm start
 ```
+
+使用 Claude Code 时，这个终端需要保持运行。
 
 让 Claude Code 连接本地 router：
 
@@ -423,6 +466,39 @@ $env:ANTHROPIC_API_KEY="local-router-key"
 claude
 ```
 
+## 多客户端模式
+
+如果你想让一个 gateway 同时服务多个 Claude Code 终端，每个终端使用不同的 route 配置，可以用 `clients` 替代单一的 `routerApiKey`：
+
+```json
+{
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 3456
+  },
+  "clients": {
+    "project-a": {
+      "apiKey": "router-token-project-a",
+      "config": "/path/to/project-a/router.config.json"
+    },
+    "project-b": {
+      "apiKey": "router-token-project-b",
+      "config": "/path/to/project-b/router.config.json"
+    }
+  }
+}
+```
+
+每个引用的 config 文件使用和 `router.config.example.json` 相同的 schema：`defaultRoute`、`stateFile`、`routeInstruction`、`upstreams`。
+
+使用多客户端模式时，gateway 启动方式不变，但每个 Claude Code 终端使用自己的 token：
+
+```sh
+ANTHROPIC_BASE_URL=http://127.0.0.1:3456 ANTHROPIC_API_KEY=router-token-project-a claude
+```
+
+router token 只是本地 gateway 的通行证，**不是**你的上游模型服务商 API key。真实的上游 API key 仍然保存在各自项目的 config 文件里。
+
 ## 行为
 
 - 支持 `POST /v1/messages`。
@@ -431,7 +507,7 @@ claude
 - 默认会往 system prompt 里追加 route 选择说明。
 - 只接受 assistant 指令里的已配置 route 名。推荐使用 `route` 字段，`model` 字段只作为向后兼容别名。
 - 如果指令缺失或非法，就保持上一轮 route 不变。
-- 默认把 route 状态写入 `.router-state.json`。
+- 默认把 route 状态写入 `.router-state.json`；多客户端模式下每个 client 有自己独立的状态文件。
 - 会保留上游路径，例如 `https://api.example.com/coding` 会变成 `https://api.example.com/coding/v1/messages`。
 
 ## 安全说明

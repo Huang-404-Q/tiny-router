@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const configPath = resolve(process.env.TINY_ROUTER_CONFIG || 'router.config.json');
+const gatewayConfigPath = resolve(process.env.TINY_ROUTER_CONFIG || 'router.config.json');
 
 const hopByHopHeaders = new Set([
   'content-encoding',
@@ -20,14 +20,13 @@ const hopByHopHeaders = new Set([
   'upgrade'
 ]);
 
-const config = normalizeConfig(await loadConfig());
-const statePath = resolve(rootDir, config.stateFile || '.router-state.json');
-let routeState = await loadRouteState(config.defaultRoute);
+const gatewayConfig = await loadGatewayConfig();
+const clientManager = await buildClientManager(gatewayConfig);
 
 const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && req.url === '/health') {
-      sendJson(res, 200, { ok: true, nextRoute: routeState.nextRoute, reason: routeState.reason, updatedAt: routeState.updatedAt });
+      await handleHealth(req, res);
       return;
     }
 
@@ -36,50 +35,89 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (config.routerApiKey && req.headers['x-api-key'] !== config.routerApiKey) {
-      sendJson(res, 401, { error: { type: 'authentication_error', message: 'Invalid router API key.' } });
-      return;
-    }
-
-    const incomingBody = await readJsonBody(req);
-    const route = normalizeRoute(routeState.nextRoute) || normalizeRoute(config.defaultRoute);
-    const upstream = config.upstreams?.[route];
-    if (!upstream) {
-      sendJson(res, 500, { error: { type: 'router_error', message: `Route ${route} has no upstream config.` } });
-      return;
-    }
-
-    const upstreamBody = prepareUpstreamBody(incomingBody, upstream.model);
-    const upstreamResponse = await fetch(buildMessagesUrl(upstream.baseUrl), {
-      method: 'POST',
-      headers: buildUpstreamHeaders(req.headers, upstream.apiKey),
-      body: JSON.stringify(upstreamBody)
-    });
-
-    if (incomingBody.stream === true) {
-      await proxyStreamingResponse(upstreamResponse, res);
-      return;
-    }
-
-    await proxyJsonResponse(upstreamResponse, res);
+    await handleMessages(req, res);
   } catch (error) {
     sendJson(res, 500, { error: { type: 'router_error', message: error.message } });
   }
 });
 
-server.listen(config.listen?.port || 3456, config.listen?.host || '127.0.0.1', () => {
+server.listen(gatewayConfig.listen?.port || 3456, gatewayConfig.listen?.host || '127.0.0.1', () => {
   const address = server.address();
   console.log(`tiny-router listening on http://${address.address}:${address.port}`);
-  console.log(`next route: ${routeState.nextRoute}`);
+  console.log(`mode: ${clientManager.multi ? 'multi-client' : 'single'}`);
+  if (!clientManager.multi) {
+    console.log(`next route: ${clientManager.default.routeState.nextRoute}`);
+  }
 });
 
-async function loadConfig() {
-  if (!existsSync(configPath)) {
-    throw new Error(`Missing config file: ${configPath}. Copy router.config.example.json to router.config.json first.`);
+async function loadGatewayConfig() {
+  if (!existsSync(gatewayConfigPath)) {
+    throw new Error(`Missing config file: ${gatewayConfigPath}. Copy router.config.example.json to router.config.json first.`);
   }
 
-  const raw = await readFile(configPath, 'utf8');
+  const raw = await readFile(gatewayConfigPath, 'utf8');
   return JSON.parse(raw);
+}
+
+async function buildClientManager(gatewayConfig) {
+  if (gatewayConfig.clients && typeof gatewayConfig.clients === 'object') {
+    const clients = new Map();
+    for (const [name, clientDef] of Object.entries(gatewayConfig.clients)) {
+      const clientConfigPath = resolve(dirname(gatewayConfigPath), clientDef.config);
+      const clientConfig = normalizeConfig(await loadClientConfig(clientConfigPath));
+      const statePath = resolveClientStatePath(clientConfigPath, clientConfig, name);
+      const routeState = await loadRouteState(statePath, clientConfig.defaultRoute, clientConfig.routeNames);
+      const ctx = createClientContext(name, clientConfig, statePath, routeState);
+      clients.set(clientDef.apiKey, ctx);
+    }
+    return { multi: true, clients };
+  }
+
+  const singleConfig = normalizeConfig(gatewayConfig);
+  const statePath = resolve(rootDir, singleConfig.stateFile || '.router-state.json');
+  const routeState = await loadRouteState(statePath, singleConfig.defaultRoute, singleConfig.routeNames);
+  const ctx = createClientContext('default', singleConfig, statePath, routeState);
+  return { multi: false, clients: new Map(), default: ctx };
+}
+
+function createClientContext(name, config, statePath, routeState) {
+  const ctx = {
+    name,
+    config,
+    statePath,
+    routeState
+  };
+
+  ctx.saveRouteState = async (route, reason) => {
+    const normalized = normalizeRoute(route, ctx.config.routeNames);
+    if (!normalized) return;
+
+    ctx.routeState = {
+      nextRoute: normalized,
+      reason: String(reason || ''),
+      updatedAt: new Date().toISOString()
+    };
+    await writeFile(ctx.statePath, JSON.stringify(ctx.routeState, null, 2));
+    console.log(`[${ctx.name}] next route set to ${ctx.routeState.nextRoute}${reason ? `: ${reason}` : ''}`);
+  };
+
+  return ctx;
+}
+
+async function loadClientConfig(clientConfigPath) {
+  if (!existsSync(clientConfigPath)) {
+    throw new Error(`Missing client config file: ${clientConfigPath}`);
+  }
+
+  const raw = await readFile(clientConfigPath, 'utf8');
+  return JSON.parse(raw);
+}
+
+function resolveClientStatePath(clientConfigPath, clientConfig, clientName) {
+  if (clientConfig.stateFile) {
+    return resolve(dirname(clientConfigPath), clientConfig.stateFile);
+  }
+  return resolve(rootDir, `.router-state.${clientName}.json`);
 }
 
 function normalizeConfig(rawConfig) {
@@ -108,31 +146,91 @@ function normalizeUpstream(upstream) {
   };
 }
 
-async function loadRouteState(defaultRoute) {
+async function loadRouteState(statePath, defaultRoute, routeNames) {
   try {
     const state = JSON.parse(await readFile(statePath, 'utf8'));
-    const nextRoute = normalizeRoute(state.nextRoute) || normalizeRoute(defaultRoute);
+    const nextRoute = normalizeRoute(state.nextRoute, routeNames) || normalizeRoute(defaultRoute, routeNames);
     return {
       nextRoute,
       reason: nextRoute === state.nextRoute ? String(state.reason || '') : '',
       updatedAt: nextRoute === state.nextRoute ? state.updatedAt : undefined
     };
   } catch {
-    return { nextRoute: normalizeRoute(defaultRoute), reason: '', updatedAt: undefined };
+    return { nextRoute: normalizeRoute(defaultRoute, routeNames), reason: '', updatedAt: undefined };
   }
 }
 
-async function saveRouteState(route, reason) {
-  const normalized = normalizeRoute(route);
-  if (!normalized) return;
-
-  routeState = { nextRoute: normalized, reason: String(reason || ''), updatedAt: new Date().toISOString() };
-  await writeFile(statePath, JSON.stringify(routeState, null, 2));
-  console.log(`next route set to ${routeState.nextRoute}${reason ? `: ${reason}` : ''}`);
+function normalizeRoute(value, routeNames) {
+  return typeof value === 'string' && routeNames.includes(value) ? value : null;
 }
 
-function normalizeRoute(value, routeNames = config.routeNames) {
-  return typeof value === 'string' && routeNames.includes(value) ? value : null;
+async function handleHealth(req, res) {
+  const token = req.headers['x-api-key'] || '';
+  const client = clientManager.multi
+    ? clientManager.clients.get(token)
+    : clientManager.default;
+
+  if (clientManager.multi && !client) {
+    sendJson(res, 200, { ok: true, mode: 'multi-client', clients: clientManager.clients.size });
+    return;
+  }
+
+  if (!client) {
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  const route = normalizeRoute(client.routeState.nextRoute, client.config.routeNames) || normalizeRoute(client.config.defaultRoute, client.config.routeNames);
+  const upstream = client.config.upstreams?.[route];
+  const model = upstream?.model || 'unknown model';
+
+  sendJson(res, 200, {
+    ok: true,
+    client: client.name,
+    nextRoute: route,
+    nextModel: model,
+    reason: client.routeState.reason,
+    updatedAt: client.routeState.updatedAt
+  });
+}
+
+async function handleMessages(req, res) {
+  const token = req.headers['x-api-key'] || '';
+  const client = clientManager.multi
+    ? clientManager.clients.get(token)
+    : clientManager.default;
+
+  if (clientManager.multi && !client) {
+    sendJson(res, 401, { error: { type: 'authentication_error', message: 'Invalid router API key.' } });
+    return;
+  }
+
+  if (!clientManager.multi && client.config.routerApiKey && token !== client.config.routerApiKey) {
+    sendJson(res, 401, { error: { type: 'authentication_error', message: 'Invalid router API key.' } });
+    return;
+  }
+
+  const incomingBody = await readJsonBody(req);
+  const route = normalizeRoute(client.routeState.nextRoute, client.config.routeNames) || normalizeRoute(client.config.defaultRoute, client.config.routeNames);
+  const upstream = client.config.upstreams?.[route];
+  if (!upstream) {
+    sendJson(res, 500, { error: { type: 'router_error', message: `Route ${route} has no upstream config.` } });
+    return;
+  }
+
+  const upstreamBody = prepareUpstreamBody(incomingBody, upstream.model, client.config);
+  const upstreamResponse = await fetch(buildMessagesUrl(upstream.baseUrl), {
+    method: 'POST',
+    headers: buildUpstreamHeaders(req.headers, upstream.apiKey),
+    body: JSON.stringify(upstreamBody)
+  });
+
+  if (incomingBody.stream === true) {
+    await proxyStreamingResponse(upstreamResponse, res, client);
+    return;
+  }
+
+  await proxyJsonResponse(upstreamResponse, res, client);
 }
 
 async function readJsonBody(req) {
@@ -142,10 +240,10 @@ async function readJsonBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-function prepareUpstreamBody(body, model) {
+function prepareUpstreamBody(body, model, routeConfig) {
   const nextBody = { ...body, model };
-  if (config.injectRouteInstruction !== false && config.routeInstruction) {
-    nextBody.system = appendSystemInstruction(nextBody.system, config.routeInstruction);
+  if (routeConfig.injectRouteInstruction !== false && routeConfig.routeInstruction) {
+    nextBody.system = appendSystemInstruction(nextBody.system, routeConfig.routeInstruction);
   }
   return nextBody;
 }
@@ -175,7 +273,7 @@ function buildUpstreamHeaders(incomingHeaders, apiKey) {
   return headers;
 }
 
-async function proxyJsonResponse(upstreamResponse, res) {
+async function proxyJsonResponse(upstreamResponse, res, client) {
   const responseText = await upstreamResponse.text();
   copyResponseHeaders(upstreamResponse, res);
   res.writeHead(upstreamResponse.status);
@@ -183,10 +281,10 @@ async function proxyJsonResponse(upstreamResponse, res) {
 
   if (!upstreamResponse.ok) return;
   const responseJson = JSON.parse(responseText);
-  await updateRouteFromAssistantText(extractTextFromMessage(responseJson));
+  await updateRouteFromAssistantText(extractTextFromMessage(responseJson), client);
 }
 
-async function proxyStreamingResponse(upstreamResponse, res) {
+async function proxyStreamingResponse(upstreamResponse, res, client) {
   copyResponseHeaders(upstreamResponse, res);
   res.writeHead(upstreamResponse.status);
 
@@ -212,7 +310,7 @@ async function proxyStreamingResponse(upstreamResponse, res) {
   assistantText += finalText.text;
 
   res.end();
-  if (upstreamResponse.ok) await updateRouteFromAssistantText(assistantText);
+  if (upstreamResponse.ok) await updateRouteFromAssistantText(assistantText, client);
 }
 
 function copyResponseHeaders(upstreamResponse, res) {
@@ -246,12 +344,12 @@ function extractTextFromSseChunk(chunk) {
   return { text, remainder };
 }
 
-async function updateRouteFromAssistantText(text) {
-  const directive = parseRouteDirective(text);
-  if (directive) await saveRouteState(directive.route, directive.reason);
+async function updateRouteFromAssistantText(text, client) {
+  const directive = parseRouteDirective(text, client);
+  if (directive) await client.saveRouteState(directive.route, directive.reason);
 }
 
-function parseRouteDirective(text) {
+function parseRouteDirective(text, client) {
   const lines = String(text || '').trim().split('\n').map((line) => line.trim()).filter(Boolean);
 
   for (const line of lines.reverse()) {
@@ -260,7 +358,7 @@ function parseRouteDirective(text) {
     try {
       const parsed = JSON.parse(line);
       const route = parsed.route || parsed.model;
-      if (normalizeRoute(route)) return { route, reason: parsed.reason };
+      if (normalizeRoute(route, client.config.routeNames)) return { route, reason: parsed.reason };
     } catch {}
   }
 

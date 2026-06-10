@@ -1,0 +1,7 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "node .claude/statusline-model.js",
+    "padding": 0
+  }
+}
