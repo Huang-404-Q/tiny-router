@@ -22,12 +22,12 @@ const hopByHopHeaders = new Set([
 
 const config = normalizeConfig(await loadConfig());
 const statePath = resolve(rootDir, config.stateFile || '.router-state.json');
-let nextRoute = await loadRouteState(config.defaultRoute || 'A');
+let routeState = await loadRouteState(config.defaultRoute);
 
 const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && req.url === '/health') {
-      sendJson(res, 200, { ok: true, nextRoute });
+      sendJson(res, 200, { ok: true, nextRoute: routeState.nextRoute, reason: routeState.reason, updatedAt: routeState.updatedAt });
       return;
     }
 
@@ -42,7 +42,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     const incomingBody = await readJsonBody(req);
-    const route = normalizeRoute(nextRoute) || normalizeRoute(config.defaultRoute) || 'A';
+    const route = normalizeRoute(routeState.nextRoute) || normalizeRoute(config.defaultRoute);
     const upstream = config.upstreams?.[route];
     if (!upstream) {
       sendJson(res, 500, { error: { type: 'router_error', message: `Route ${route} has no upstream config.` } });
@@ -70,7 +70,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(config.listen?.port || 3456, config.listen?.host || '127.0.0.1', () => {
   const address = server.address();
   console.log(`tiny-router listening on http://${address.address}:${address.port}`);
-  console.log(`next route: ${nextRoute}`);
+  console.log(`next route: ${routeState.nextRoute}`);
 });
 
 async function loadConfig() {
@@ -83,11 +83,19 @@ async function loadConfig() {
 }
 
 function normalizeConfig(rawConfig) {
+  const upstreams = Object.fromEntries(
+    Object.entries(rawConfig.upstreams || {}).map(([route, upstream]) => [route, normalizeUpstream(upstream)])
+  );
+  const routeNames = Object.keys(upstreams);
+  const defaultRoute = normalizeRoute(rawConfig.defaultRoute, routeNames) || routeNames[0];
+
+  if (!defaultRoute) throw new Error('Config must define at least one upstream route.');
+
   return {
     ...rawConfig,
-    upstreams: Object.fromEntries(
-      Object.entries(rawConfig.upstreams || {}).map(([route, upstream]) => [route, normalizeUpstream(upstream)])
-    )
+    defaultRoute,
+    routeNames,
+    upstreams
   };
 }
 
@@ -103,9 +111,14 @@ function normalizeUpstream(upstream) {
 async function loadRouteState(defaultRoute) {
   try {
     const state = JSON.parse(await readFile(statePath, 'utf8'));
-    return normalizeRoute(state.nextRoute) || normalizeRoute(defaultRoute) || 'A';
+    const nextRoute = normalizeRoute(state.nextRoute) || normalizeRoute(defaultRoute);
+    return {
+      nextRoute,
+      reason: nextRoute === state.nextRoute ? String(state.reason || '') : '',
+      updatedAt: nextRoute === state.nextRoute ? state.updatedAt : undefined
+    };
   } catch {
-    return normalizeRoute(defaultRoute) || 'A';
+    return { nextRoute: normalizeRoute(defaultRoute), reason: '', updatedAt: undefined };
   }
 }
 
@@ -113,13 +126,13 @@ async function saveRouteState(route, reason) {
   const normalized = normalizeRoute(route);
   if (!normalized) return;
 
-  nextRoute = normalized;
-  await writeFile(statePath, JSON.stringify({ nextRoute, reason: String(reason || ''), updatedAt: new Date().toISOString() }, null, 2));
-  console.log(`next route set to ${nextRoute}${reason ? `: ${reason}` : ''}`);
+  routeState = { nextRoute: normalized, reason: String(reason || ''), updatedAt: new Date().toISOString() };
+  await writeFile(statePath, JSON.stringify(routeState, null, 2));
+  console.log(`next route set to ${routeState.nextRoute}${reason ? `: ${reason}` : ''}`);
 }
 
-function normalizeRoute(value) {
-  return value === 'A' || value === 'B' ? value : null;
+function normalizeRoute(value, routeNames = config.routeNames) {
+  return typeof value === 'string' && routeNames.includes(value) ? value : null;
 }
 
 async function readJsonBody(req) {
@@ -235,7 +248,7 @@ function extractTextFromSseChunk(chunk) {
 
 async function updateRouteFromAssistantText(text) {
   const directive = parseRouteDirective(text);
-  if (directive) await saveRouteState(directive.model, directive.reason);
+  if (directive) await saveRouteState(directive.route, directive.reason);
 }
 
 function parseRouteDirective(text) {
@@ -246,7 +259,8 @@ function parseRouteDirective(text) {
 
     try {
       const parsed = JSON.parse(line);
-      if (normalizeRoute(parsed.model)) return parsed;
+      const route = parsed.route || parsed.model;
+      if (normalizeRoute(route)) return { route, reason: parsed.reason };
     } catch {}
   }
 

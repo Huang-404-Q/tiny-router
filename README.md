@@ -4,10 +4,10 @@ English | [中文](#中文)
 
 A tiny Anthropic-compatible gateway for Claude Code routing experiments.
 
-Claude Code talks only to this local server. The router forwards each `/v1/messages` request to route `A` or `B`, then lets the assistant choose the next route by appending a JSON directive at the end of the response.
+Claude Code talks only to this local server. The router forwards each `/v1/messages` request to a configured local route such as `control` or `execution`, then lets the assistant choose the next route by appending a JSON directive at the end of the response.
 
 ```json
-{"model":"B","reason":"local code edit"}
+{"route":"execution","reason":"local code edit"}
 ```
 
 The router treats that directive as a whitelist state update only. Real upstream `baseUrl`, API keys, and model names stay in local config and are never trusted from model output.
@@ -17,15 +17,15 @@ The router treats that directive as a whitelist state update only. Real upstream
 You run `tiny-router` as a local gateway first. Then Claude Code connects to `tiny-router` instead of connecting directly to your model provider.
 
 ```text
-Claude Code -> tiny-router -> upstream A or upstream B
+Claude Code -> tiny-router -> upstream control or upstream execution
 ```
 
 The config file is local-only:
 
 - Claude Code only sees `ANTHROPIC_BASE_URL=http://127.0.0.1:3456` and your local `routerApiKey`.
 - `tiny-router` reads `router.config.json` and knows the real upstream API keys, base URLs, and model names.
-- The assistant may suggest the next route with `{"model":"A"}` or `{"model":"B"}`.
-- The router only accepts `A` or `B` as local route names. It never trusts model output for real API keys, real model names, or real base URLs.
+- The assistant may suggest the next route with `{"route":"control"}` or `{"route":"execution"}`.
+- The router only accepts configured local route names. It never trusts model output for real API keys, real model names, or real base URLs.
 
 You do not need to manually add the routing instruction to every prompt. By default, `tiny-router` appends `routeInstruction` to the request system prompt on each request. You can edit that instruction in `router.config.json`, or disable it with:
 
@@ -59,12 +59,12 @@ cp router.config.example.json router.config.json
 ```json
 {
   "upstreams": {
-    "A": {
+    "control": {
       "baseUrl": "https://your-strong-provider.example.com",
       "apiKey": "your-strong-provider-key",
       "model": "strong-model"
     },
-    "B": {
+    "execution": {
       "baseUrl": "https://your-cheap-provider.example.com",
       "apiKey": "your-cheap-provider-key",
       "model": "cheap-model"
@@ -89,46 +89,38 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:3456 ANTHROPIC_API_KEY=local-router-key clau
 
 ## Windows One-Command Launch
 
-On Windows, the easiest way is to let the helper script start the router and launch Claude Code with the right temporary environment variables:
+On Windows, you can use the root-level `.cmd` files without `npm link`.
 
-```powershell
-npm run claude:router
-```
-
-This command is meant to be run from the `tiny-router` project directory.
-
-For global use, link the package once:
-
-```powershell
-npm link
-```
-
-Then you can run this from the directory that contains `router.config.json`:
-
-```powershell
-claude-router
-```
-
-Or pass a config path from anywhere:
-
-```powershell
-claude-router --config D:\path\to\router.config.json
-```
-
-The launcher will:
-
-- read `router.config.json`
-- start `tiny-router` if it is not already running
-- unset `ANTHROPIC_AUTH_TOKEN` for this Claude Code process to avoid auth conflicts
-- set `ANTHROPIC_BASE_URL` to the local router
-- set `ANTHROPIC_API_KEY` to `routerApiKey`
-- launch `claude`
-
-For `cmd.exe`, you can also run the local script from the `tiny-router` project directory:
+Step 1: start the gateway in one terminal:
 
 ```bat
-scripts\claude-router.cmd
+start-router.cmd
 ```
+
+Step 2: open a Claude Code terminal with router environment variables already set:
+
+```bat
+use-router.cmd
+```
+
+Then run Claude Code inside that terminal:
+
+```bat
+claude
+```
+
+If you want one command that sets the environment and launches Claude Code immediately, run:
+
+```bat
+claude-router.cmd
+```
+
+The scripts will:
+
+- read `router.config.json`
+- set `ANTHROPIC_BASE_URL` to the local router
+- set `ANTHROPIC_API_KEY` to `routerApiKey`
+- unset `ANTHROPIC_AUTH_TOKEN` for that terminal or Claude Code process to avoid auth conflicts
 
 ## Setup
 
@@ -147,14 +139,14 @@ Edit `router.config.json` with your own upstreams:
     "port": 3456
   },
   "routerApiKey": "local-router-key",
-  "defaultRoute": "A",
+  "defaultRoute": "control",
   "upstreams": {
-    "A": {
+    "control": {
       "baseUrl": "https://expensive-provider.example.com",
       "apiKey": "your-expensive-provider-key",
       "model": "expensive-model-name"
     },
-    "B": {
+    "execution": {
       "baseUrl": "https://cheap-provider.example.com",
       "apiKey": "your-cheap-provider-key",
       "model": "cheap-model-name"
@@ -168,7 +160,7 @@ You can also use Claude Code-style env blocks:
 ```json
 {
   "upstreams": {
-    "A": {
+    "control": {
       "env": {
         "ANTHROPIC_AUTH_TOKEN": "your-provider-key",
         "ANTHROPIC_BASE_URL": "https://provider.example.com",
@@ -205,7 +197,7 @@ claude
 - Supports normal JSON responses and streaming SSE responses.
 - Replaces the request `model` with the configured model for the current route.
 - Appends a route instruction to the system prompt by default.
-- Accepts only `A` or `B` from the assistant directive.
+- Accepts only configured route names from the assistant directive. `route` is preferred; `model` remains a backward-compatible alias.
 - Keeps the previous route if the directive is missing or invalid.
 - Writes route state to `.router-state.json` by default.
 - Preserves upstream paths, so a base URL like `https://api.example.com/coding` becomes `https://api.example.com/coding/v1/messages`.
@@ -215,7 +207,7 @@ claude
 - Do not commit `router.config.json` or any real API keys.
 - Do not expose this router to the public internet.
 - Keep `listen.host` set to `127.0.0.1` unless you know exactly what you are doing.
-- The assistant can only choose `A` or `B`; it cannot choose a real model name, API key, or base URL.
+- The assistant can only choose configured local route names; it cannot choose a real model name, API key, or base URL.
 - Rotate any key that was committed, logged publicly, or pasted into a public issue.
 
 ## Check
@@ -232,7 +224,7 @@ Run the fake upstream integration test:
 npm test
 ```
 
-The test starts two local fake upstreams and verifies route switching, model rewriting, invalid route fallback, and upstream path handling.
+The test starts two local fake upstreams and verifies route switching, model rewriting, invalid route fallback, streaming directive parsing, and upstream path handling.
 
 ## License
 
@@ -244,10 +236,10 @@ MIT
 
 一个很小的 Anthropic-compatible gateway，用来做 Claude Code 的模型路由实验。
 
-Claude Code 只连接这个本地服务。router 会把每一轮 `/v1/messages` 请求转发到 route `A` 或 `B`，然后让 assistant 在回复末尾追加一个 JSON 指令，用来选择下一轮 route。
+Claude Code 只连接这个本地服务。router 会把每一轮 `/v1/messages` 请求转发到配置好的本地 route，比如 `control` 或 `execution`，然后让 assistant 在回复末尾追加一个 JSON 指令，用来选择下一轮 route。
 
 ```json
-{"model":"B","reason":"local code edit"}
+{"route":"execution","reason":"local code edit"}
 ```
 
 router 只把这个 JSON 当成白名单状态更新。真实的上游 `baseUrl`、API key、模型名都只保存在本地配置里，永远不相信模型输出里的真实上游信息。
@@ -257,15 +249,15 @@ router 只把这个 JSON 当成白名单状态更新。真实的上游 `baseUrl`
 你需要先启动 `tiny-router` 这个本地 gateway。然后让 Claude Code 连接 `tiny-router`，而不是直接连接模型服务商。
 
 ```text
-Claude Code -> tiny-router -> 上游 A 或上游 B
+Claude Code -> tiny-router -> 上游 control 或上游 execution
 ```
 
 配置文件只保存在本地：
 
 - Claude Code 只知道 `ANTHROPIC_BASE_URL=http://127.0.0.1:3456` 和你的本地 `routerApiKey`。
 - `tiny-router` 会读取 `router.config.json`，里面保存真实上游 API key、base URL 和模型名。
-- assistant 可以用 `{"model":"A"}` 或 `{"model":"B"}` 建议下一轮 route。
-- router 只接受 `A` 或 `B` 这两个本地 route 名。它永远不会相信模型输出里的真实 API key、真实模型名或真实 base URL。
+- assistant 可以用 `{"route":"control"}` 或 `{"route":"execution"}` 建议下一轮 route。
+- router 只接受配置里的本地 route 名。它永远不会相信模型输出里的真实 API key、真实模型名或真实 base URL。
 
 你不需要手动在每个 prompt 里写路由约束。默认情况下，`tiny-router` 每轮都会把 `routeInstruction` 追加到 system prompt。你可以在 `router.config.json` 里修改这段约束，也可以关闭它：
 
@@ -299,12 +291,12 @@ cp router.config.example.json router.config.json
 ```json
 {
   "upstreams": {
-    "A": {
+    "control": {
       "baseUrl": "https://your-strong-provider.example.com",
       "apiKey": "your-strong-provider-key",
       "model": "strong-model"
     },
-    "B": {
+    "execution": {
       "baseUrl": "https://your-cheap-provider.example.com",
       "apiKey": "your-cheap-provider-key",
       "model": "cheap-model"
@@ -329,46 +321,38 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:3456 ANTHROPIC_API_KEY=local-router-key clau
 
 ## Windows 一键启动
 
-在 Windows 上，最简单的方式是让 helper script 自动启动 router，并用正确的临时环境变量启动 Claude Code：
+在 Windows 上，不需要 `npm link`，也不需要手动设置环境变量。用项目根目录下的两个 `.cmd` 文件就行。
 
-```powershell
-npm run claude:router
-```
-
-这个命令需要在 `tiny-router` 项目目录下运行。
-
-如果你想全局使用，可以先在项目目录里执行一次：
-
-```powershell
-npm link
-```
-
-之后你可以在包含 `router.config.json` 的目录里直接运行：
-
-```powershell
-claude-router
-```
-
-也可以在任何目录传入配置文件路径：
-
-```powershell
-claude-router --config D:\path\to\router.config.json
-```
-
-这个 launcher 会：
-
-- 读取 `router.config.json`
-- 如果 `tiny-router` 没启动，就自动启动它
-- 为这次 Claude Code 进程清掉 `ANTHROPIC_AUTH_TOKEN`，避免 auth conflict
-- 把 `ANTHROPIC_BASE_URL` 设置成本地 router
-- 把 `ANTHROPIC_API_KEY` 设置成 `routerApiKey`
-- 启动 `claude`
-
-如果你用的是 `cmd.exe`，也可以在 `tiny-router` 项目目录下运行本地脚本：
+第一步：开一个终端启动网关：
 
 ```bat
-scripts\claude-router.cmd
+start-router.cmd
 ```
+
+第二步：再开一个已经配置好 tiny-router 环境变量的终端：
+
+```bat
+use-router.cmd
+```
+
+然后在这个终端里正常运行 Claude Code：
+
+```bat
+claude
+```
+
+如果你想一步直接启动 Claude Code，也可以运行：
+
+```bat
+claude-router.cmd
+```
+
+这些脚本会：
+
+- 读取 `router.config.json`
+- 把 `ANTHROPIC_BASE_URL` 设置成本地 router
+- 把 `ANTHROPIC_API_KEY` 设置成 `routerApiKey`
+- 清掉这个终端里的 `ANTHROPIC_AUTH_TOKEN`，避免 auth conflict
 
 ## 配置
 
@@ -387,14 +371,14 @@ cp router.config.example.json router.config.json
     "port": 3456
   },
   "routerApiKey": "local-router-key",
-  "defaultRoute": "A",
+  "defaultRoute": "control",
   "upstreams": {
-    "A": {
+    "control": {
       "baseUrl": "https://expensive-provider.example.com",
       "apiKey": "your-expensive-provider-key",
       "model": "expensive-model-name"
     },
-    "B": {
+    "execution": {
       "baseUrl": "https://cheap-provider.example.com",
       "apiKey": "your-cheap-provider-key",
       "model": "cheap-model-name"
@@ -408,7 +392,7 @@ cp router.config.example.json router.config.json
 ```json
 {
   "upstreams": {
-    "A": {
+    "control": {
       "env": {
         "ANTHROPIC_AUTH_TOKEN": "your-provider-key",
         "ANTHROPIC_BASE_URL": "https://provider.example.com",
@@ -445,7 +429,7 @@ claude
 - 支持普通 JSON 响应和 streaming SSE 响应。
 - 会把请求里的 `model` 替换成当前 route 在本地配置里的真实模型名。
 - 默认会往 system prompt 里追加 route 选择说明。
-- 只接受 assistant 指令里的 `A` 或 `B`。
+- 只接受 assistant 指令里的已配置 route 名。推荐使用 `route` 字段，`model` 字段只作为向后兼容别名。
 - 如果指令缺失或非法，就保持上一轮 route 不变。
 - 默认把 route 状态写入 `.router-state.json`。
 - 会保留上游路径，例如 `https://api.example.com/coding` 会变成 `https://api.example.com/coding/v1/messages`。
@@ -455,7 +439,7 @@ claude
 - 不要提交 `router.config.json` 或任何真实 API key。
 - 不要把这个 router 暴露到公网。
 - 除非你非常清楚自己在做什么，否则保持 `listen.host` 为 `127.0.0.1`。
-- assistant 只能选择 `A` 或 `B`，不能选择真实模型名、API key 或 base URL。
+- assistant 只能选择配置里的本地 route 名，不能选择真实模型名、API key 或 base URL。
 - 任何已经提交、公开日志记录、或贴到公开 issue 里的 key 都应该轮换。
 
 ## 检查
@@ -472,7 +456,7 @@ npm run check
 npm test
 ```
 
-测试会启动两个本地 fake upstream，验证 route 切换、模型名重写、非法 route fallback、以及上游路径拼接。
+测试会启动两个本地 fake upstream，验证 route 切换、模型名重写、非法 route fallback、streaming 指令解析、以及上游路径拼接。
 
 ## License
 

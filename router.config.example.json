@@ -3,21 +3,21 @@
     "host": "127.0.0.1",
     "port": 3456
   },
-  "routerApiKey": "dev-router-key",
-  "defaultRoute": "A",
+  "routerApiKey": "local-router-key",
+  "defaultRoute": "control",
   "stateFile": ".router-state.json",
   "injectRouteInstruction": true,
-  "routeInstruction": "At the very end of every assistant response, append exactly one JSON object on its own line choosing the model for the next request: {\"model\":\"A\",\"reason\":\"short reason\"} or {\"model\":\"B\",\"reason\":\"short reason\"}. Choose A for planning, architecture, broad reasoning, and difficult debugging. Choose B for execution, local edits, narrow code changes, and running commands.",
+  "routeInstruction": "At the very end of every assistant response, append exactly one JSON object on its own line choosing the route for the next request: {\"route\":\"control\",\"reason\":\"short reason\"} or {\"route\":\"execution\",\"reason\":\"short reason\"}. Choose control for planning, architecture, broad reasoning, and difficult debugging. Choose execution for implementation, local edits, narrow code changes, and running commands.",
   "upstreams": {
-    "A": {
+    "control": {
       "baseUrl": "https://api.anthropic.com",
       "apiKey": "sk-ant-...",
       "model": "claude-opus-4-7"
     },
-    "B": {
-      "baseUrl": "https://api.anthropic.com",
-      "apiKey": "sk-ant-...",
-      "model": "claude-sonnet-4-6"
+    "execution": {
+      "baseUrl": "https://api.deepseek.com/anthropic",
+      "apiKey": "sk-...",
+      "model": "deepseek-chat"
     }
   }
 }

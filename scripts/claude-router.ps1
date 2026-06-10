@@ -11,7 +11,7 @@ if (-not (Test-Path $Config)) {
 
 $configJson = Get-Content $Config -Raw | ConvertFrom-Json
 $port = if ($configJson.listen.port) { [int]$configJson.listen.port } else { 3456 }
-$key = if ($configJson.routerApiKey) { [string]$configJson.routerApiKey } else { 'dev-router-key' }
+$key = if ($configJson.routerApiKey) { [string]$configJson.routerApiKey } else { 'local-router-key' }
 $baseUrl = "http://127.0.0.1:$port"
 
 function Test-RouterHealth {
@@ -28,7 +28,7 @@ if (-not (Test-RouterHealth)) {
   Start-Process powershell -ArgumentList @(
     '-NoExit',
     '-Command',
-    "Set-Location '$Root'; npm start"
+    "Set-Location '$Root'; node src/server.js"
   ) | Out-Null
 
   $deadline = (Get-Date).AddSeconds(10)
